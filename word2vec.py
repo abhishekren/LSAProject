@@ -29,11 +29,22 @@ def dense_layer(word_vectors, params):
     post_softmax = np.divide(np.exp(pre_softmaxvecs), np.sum(np.exp(pre_softmaxvecs)))
     return post_softmax
 
+def forward_prop():
+    # TO FILL IN
+
+
 # Back Propogation
 def calculate_error(post_softmax, labeled_data):
     dimension = post_softmax.shape[1]
     error = (-1/dimension)*np.sum(np.sum(labeled_data*post_softmax))
     return error
+
+def dense_back_prop():
+    softmax_derivative = 
+    # TO FILL IN
+
+def embedding_back_prop():
+    # TO FILL IN
 
 # Training
 def training():
