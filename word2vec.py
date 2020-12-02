@@ -1,11 +1,13 @@
 import numpy as np
-from random import sample
+from random import sample, choices
 import sys
 import re
 import nltk
 from nltk.corpus import stopwords
 import tqdm
 from tqdm import tqdm
+import pickle
+from collections import Counter
 from gensim.corpora import WikiCorpus
 
 # Initialization functions
@@ -16,44 +18,73 @@ errstring = "Must run forward inference before backpropagation"
 
 
 class Embedding:
+    """A class representing an autoencoder for LSA Embedding
 
-    def __init__(self, latent_dim, corpus, data_ratio=3):
-        self.dim = latent_dim
+    :param latent_dim: The dimension of the latent space in which to embed words.
+    :param corpus: A list containing all the words we wish to embed.
+    :param window: The length of the context word window.
+    :param load_weights: Whether or not to load a pretrained model we have saved
+                            from a previous training session. If a pretrained
+                            model is loaded then the fit function is disabled
+                            since our model will already be fit to the data.
+    """
+
+    def __init__(self, latent_dim, corpus, window=3, load_weights=False):
+
+        # Load weights if necessary
+        if load_weights:
+            self.load()
+            self.has_data = False
+            return
+        self.has_data = True
+
+        # Define activation
         self.sigmoid = lambda x: np.divide(1, np.add(1, np.exp(-x)))
-        self.words = set()
-        self.idx = dict()
-        curr_idx = 0
-        for word in corpus:
-            if word not in self.words:
-                self.words.add(word)
-                self.idx[word] = curr_idx
-                curr_idx += 1
-        print(f"found words {len(self.words)} words in a corpus of length {len(corpus)}")
-        self.num_data = data_ratio * len(self.words)
-        self.X = np.zeros((len(self.words), self.num_data))
-        self.y = np.zeros((len(self.words), self.num_data))
-        count = 0
-        for i in sample(range(len(corpus)), self.num_data):
-            start = max(0, i - 10)
-            end = min(len(corpus), i + 10)
-            indices = [self.idx[x] for x in corpus[start:end]]
-            self.y[indices, count] = 1
-            self.X[self.idx[corpus[i]], count] = 1
-            count += 1
-        self.weights1 = np.random.rand(self.dim, len(self.words))
-        self.weights2 = np.random.rand(len(self.words), self.dim)
 
-    def fit(self, learning_rate, epochs):
+        # Separate unique words and construct one-hot encoding
+        # self.idx will store the one-hot index of each word
+        self.words = set(corpus)
+        self.idx = {word: i for i, word in enumerate(self.words)}
+        print(f"found words {len(self.words)} words in a corpus of length {len(corpus)}")
+
+        # Initialize data to all negative examples
+        self.X = np.eye(len(self.words))
+        self.y = np.zeros(2 * (len(self.words),))
+
+        # Add in all positive examples
+        for i in range(len(corpus)):
+            # Get the one-hot encoding indices of all words in window
+            # Remove one-hot encoding index of center word
+            start = max(0, i - window)
+            end = min(len(corpus), i + window)
+            indices = [self.idx[x] for x in corpus[start:end]]
+            curr = indices.pop(i - start)
+            # Add positive example (w', w) for w the center and all w' in window
+            # REMEMBER: first index of y corresponds to w', second index to w
+            self.y[indices, curr] += 1
+
+        # Normalize target so that y[w, w'] is the
+        # probability that w' appears within window
+        # of a randomly chosen appearance of w
+        self.y = self.y / np.sum(self.y, axis=0)
+
+        # Randomly initialize embeddings
+        self.weights1 = np.random.rand(latent_dim, len(self.words))
+        self.weights2 = np.random.rand(len(self.words), latent_dim)
+
+    def fit(self, lr, epochs):
+        if not self.has_data: #Don't train if this is a pre-trained model!
+            return
         for i in range(epochs):
-            data_bar = tqdm(range(self.num_data), position=0, leave=True)
+            data_bar = tqdm(range(len(self.words)), position=0, leave=True)
             data_bar.set_description(f"Processing epoch {i+1} out of {epochs}")
             for j in data_bar:
                 hidden = self.weights1 @ self.X[:, j]
                 output = self.sigmoid(self.weights2 @ hidden)
                 delta = (self.y[:, j] - output) * output * np.add(1, -output)
-                self.weights1 -= learning_rate * np.outer(hidden, delta)
+                self.weights1 -= lr * np.outer(hidden, delta)
                 delta = self.weights2.T @ delta
-                self.weights2 -= learning_rate * np.outer(self.X[:, j], delta)
+                self.weights2 -= lr * np.outer(self.X[:, j], delta)
         return self
 
     def _get_one_hot(self, word):
@@ -80,12 +111,56 @@ class Embedding:
         return others
 
     def save(self):
+        kwargs = {'protocol': pickle.HIGHEST_PROTOCOL}
         np.save("weights1", self.weights1)
         np.save("weights2", self.weights2)
+        with open('word_indices.pickle', 'wb') as handle:
+            pickle.dump(self.idx, handle, **kwargs)
 
     def load(self):
         self.weights1 = np.load("weights1")
         self.weights2 = np.load("weights1")
+        with open('word_indices.pickle', 'rb') as handle:
+            self.idx = pickle.load(handle)
+
+
+class AltEmbedding:
+
+    def __init__(self, latent_dim, corpus, window=10):
+        self.words = set(corpus)
+        idx = {word: i for i, word in enumerate(self.words)}
+        self.freqs = Counter([idx[word] for word in corpus])
+        self.idx = {i: idx[word] for i, word in enumerate(corpus)}
+        print(f"found words {len(self.words)} words in a corpus of length {len(corpus)}")
+        self.center = np.random.randn(len(self.words), latent_dim)
+        self.context = np.random.randn(latent_dim, len(self.words))
+        self.window = window
+
+    def fit(self, lr, epochs):
+        for i in range(epochs):
+            data_bar = tqdm(range(len(self.words)), position=0, leave=True)
+            data_bar.set_description(f"Processing epoch {i+1} out of {epochs}")
+            for j in data_bar:
+                center_index = self.idx[j]
+                start = max(j - self.window, 0)
+                end = min(j + self.window, len(corpus) - 1) + 1
+                for k in range(start, end):
+                    if k == 0: next
+                    context_index = self.idx[k]
+                    e = np.exp(-(self.center[[center_index], :] @ self.context[:, [context_index]])[0][0])
+                    self.center[[center_index], :] += lr * e / (1 + e) * self.context[:, [context_index]].T
+                    self.context[:, [context_index]] += lr * e / (1 + e) * self.center[[center_index], :].T
+                neg_index = choices(range(len(self.words)), weights=self.freqs, k=2*self.window)
+                for k in neg_index:
+                    context_index = k
+                    e = np.exp(-(self.center[[center_index], :] @ self.context[:, [context_index]])[0][0])
+                    self.center[[center_index], :] += lr * -1 / (1 + e) * self.context[:, [context_index]].T
+                    self.context[:, [context_index]] += lr * -1 / (1 + e) * self.center[[center_index], :].T
+
+
+
+
+
 
 
 if __name__ == '__main__':
@@ -99,7 +174,7 @@ if __name__ == '__main__':
     stops = set(stopwords.words('english'))
     corpus = [word for word in corpus if word not in stops]
     file.close()
-    embed = Embedding(300, corpus, data_ratio=5).fit(0.001, 3)
+    embed = Embedding(300, corpus).fit(0.001, 3)
     embed.save()
     print(f"Context words for 'philosopher': {embed.most_similar('philosopher')[:5]}")
 
