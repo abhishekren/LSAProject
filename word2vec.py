@@ -213,7 +213,6 @@ def dense_layer(word_vectors, params):
     post_softmax = np.divide(np.exp(pre_softmaxvecs), np.sum(np.exp(pre_softmaxvecs)))
     return post_softmax
 
-
 # Back Propogation
 def calculate_error(post_softmax, labeled_data):
     dimension = post_softmax.shape[1]
