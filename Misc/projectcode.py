@@ -17,20 +17,21 @@ from multiprocessing import Process, freeze_support
 print("program started...")
 # black boxed word2vec model from gensim
 def download_data_as_text():
+    all_articles = []
     for article in reuters.fileids():
         all_articles += reuters.raw(article)
 
-    filename=open("test.txt", "w")
-    filename.write(all_articles)
+    return all_articles
 
-def train_word2vec():
-    reuters_text = open("test.txt", "r")
-    model = Word2Vec(LineSentence(reuters_text), sg=0, size=100, window=5, workers=2)
-    model.save("test.word2vec")
+# Generate the model using Word2Vec and save it in a file called reuters.word2vec
+def train_word2vec(text):
+    model = Word2Vec(LineSentence(text), sg=0, size=100, window=5, workers=2)
+    model.save("reuters.word2vec")
 
-# word similarity
+# Use the model in reuters.word2vec to create a function that takes in a word and outputs the 10 most similar words
+# semantically to the given word.
 def word_sim(word):
-    model = gensim.models.Word2Vec.load('test.word2vec')
+    model = gensim.models.Word2Vec.load('reuters.word2vec')
 
     if word in model.wv.index2word:
         for sim_word in model.most_similar(positive=[word]):
@@ -38,7 +39,10 @@ def word_sim(word):
     else:
         print("this word is not in the corpus!")
 
-# word_sim("economy")
+text = download_data_as_text()
+train_word2vec(text)
+word_sim("economy")
+word_sim("corn")
 
 def download_as_tokens():
     all_articles=[]
@@ -83,7 +87,6 @@ def find_best_coherence(tokens, range_num_topics):
     for i in range(range_num_topics):
         mod = train_LSIModel(tokens, i+1)
         coherences[i] = CoherenceModel(model=mod, texts=tokens, dictionary=dct, coherence='c_v').get_coherence()
-        print("gets here "+str(i))
     # Find maximum
     maximum = coherences[0]
     max_index = 0
@@ -101,7 +104,7 @@ def compute_coherence(tokens, num_topics):
         mod = train_LSIModel(tokens, num_topics)
         coh_mod = CoherenceModel(model=mod, texts=tokens, dictionary=dct, coherence='c_v')
         return coh_mod.get_coherence()
-tokens = download_as_tokens()
-train_LSIModel(tokens, 20)
-print(compute_coherence(tokens, 20))
-doc_sim()
+#tokens = download_as_tokens()
+#train_LSIModel(tokens, 20)
+#print(compute_coherence(tokens, 20))
+#doc_sim()
